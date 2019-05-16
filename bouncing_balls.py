@@ -28,7 +28,7 @@ class BouncyBalls(object):
     def __init__(self):
         # Space
         self._space = pymunk.Space()
-        self._space.gravity = (0.0, -900.0)
+        self._space.gravity = (0.0, random.uniform(-200.0,-900.0)) #-900.0)
 
         # Physics
         # Time step
