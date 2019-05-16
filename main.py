@@ -1,7 +1,8 @@
 from multiprocessing.pool import ThreadPool
 import multiprocessing as mpc
 from time import time as timer
-from urllib2 import urlopen
+#from urllib2 import urlopen
+import math
 
 import array
 import numpy
@@ -14,12 +15,46 @@ from deap import algorithms
 
 import argparse
 
+import asyncio
+import sys
+from typing import IO
+import urllib.error
+import urllib.parse
+import aiofiles
+import aiohttp
+from aiohttp import ClientSession
+
+import os
+
+# 107m31.432s
+
 parser = argparse.ArgumentParser(description='Executes Cloud-GA')
 parser.add_argument('--remote',
                     help='Call GCP instead of local.',
                     action='store_true')
+args = parser.parse_args()
+if not args.remote:
+  from bouncing_balls import BouncyBalls
 
-url = "https://us-central1-parallelea.cloudfunctions.net/ea-test2"
+url = 'https://us-central1-parallelea.cloudfunctions.net/ea-test-pymunk'
+#url = "https://us-central1-parallelea.cloudfunctions.net/ea-test-ackley"
+#url = "https://us-central1-parallelea.cloudfunctions.net/ea-test2"
+
+def evalAckley(individual): # indv: [x,y] where -5 < x,y < 5 
+  x = individual[0]
+  y = individual[1]
+  val = -20.                                            * \
+        math.exp(-0.2 * math.sqrt(0.5 * (x**2 + y**2))) - \
+        math.exp(0.5 * (math.cos(2. * math.pi * x)      + \
+                        math.cos(2. * math.pi * y)))    + \
+        math.e + 20.
+  return val,
+
+def eval2DPhysics(individual): #TBD - do something with indiv!
+  os.environ['SDL_VIDEODRIVER'] = 'dummy' # Run pygame headless
+  game = BouncyBalls()
+  game.run()
+  return random.random(),
 
 def evalOneMax(individual):
   return sum(individual),
@@ -31,7 +66,7 @@ def evalWeights(individual):
     s += individual[i] * equation_inputs[i]
   return s,
 
-def evalRemoteWeights(individual):
+async def evalRemoteWeights(individual):
   indv = ""
   for i in range(len(individual)):
     indv += indv + "&x%d=%f" % (i, individual[i])
@@ -49,36 +84,78 @@ creator.create("Individual", list, fitness=creator.FitnessMax)
 
 toolbox = base.Toolbox()
 
-toolbox.register("attr_float", random.random)
+toolbox.register("attr_float", random.uniform, -5.0, 5.0)
 #toolbox.register("attr_bool", random.randint, 0, 1)
-toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_float, 6)
+toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_float, 2)
 toolbox.register("population", tools.initRepeat, list, toolbox.individual)
 
-toolbox.register("evaluate", evalWeights)#evalOneMax)
+ 
+pool = mpc.Pool()
+toolbox.register("map", pool.map)
+
+toolbox.register("evaluate", eval2DPhysics)#evalAckley)#evalWeights)#evalOneMax)
 toolbox.register("mate", tools.cxTwoPoint)
 #toolbox.register("mate", tools.cxTwoPoint)
 toolbox.register("mutate", tools.mutGaussian, mu=0.0, sigma=0.2, indpb=0.2)
 #toolbox.register("mutate", tools.mutFlipBit, indpb=0.05)
 toolbox.register("select", tools.selTournament, tournsize=3)
 
+async def fetchCF(indv: str, session: ClientSession, **kwargs) -> str:
+  resp = await session.request(method="GET", url=indv, **kwargs)
+  resp.raise_for_status()
+  html = await resp.text()
+  return html
+
+async def callCF(indv: str, session: ClientSession, **kwargs) -> float:
+  try:
+    html = await fetchCF(indv=indv, session=session, **kwargs)
+  except (
+    aiohttp.ClientError,
+    aiohttp.http_exceptions.HttpProcessingError,
+  ) as e:
+    #return "Error processing [%s]" % indv
+    return -9999.99,
+  else:
+    if html == 'Done.':
+      return 1.0,#float(html),
+    else:
+      return random.uniform(0.0,0.9),
+
+async def evalAsync(pop: set, **kwargs) -> None:
+  async with ClientSession() as session:
+    tasks = []
+    for p in pop:
+      tasks.append(
+        callCF(indv=p,session=session,**kwargs)
+      )
+    return await asyncio.gather(*tasks)
 
 def main(remote):
-  pop = toolbox.population(n=1000)#300)
+  pop = toolbox.population(n=20)#300)
   CXPB, MUTPB = 0.5, 0.2
-  pool = mpc.Pool(processes=12)
+  #url = 'https://us-central1-parallelea.cloudfunctions.net/ea-test2' --> global now
+  #pool = mpc.Pool(processes=12)
 
   if remote:
-    fitnesses = pool.map(evalRemoteWeights, pop)
+    # Turn population into CF URLs
+    pop_urls = []
+    for indv in pop:
+      pop_urls.append('%s?x0=%f&x1=%f' % (url, indv[0], indv[1]))
+      #pop_urls.append('%s?x0=%f&x1=%f&x2=%f&x3=%f&x4=%f&x5=%f' % (url,indv[0],indv[1],indv[2],indv[3],indv[4],indv[5]))
+    fitnesses = asyncio.run(evalAsync(pop=pop_urls))
+
+    #fitnesses = pool.map(evalRemoteWeights, pop)
     #fitnesses = list(ThreadPool(20).imap_unordered(evalRemoteWeights, pop))
   else:
-    fitnesses = list(map(toolbox.evaluate, pop))
+    fitnesses = toolbox.map(toolbox.evaluate, pop)
+    #fitnesses = list(map(toolbox.evaluate, pop))
   for ind, fit in zip(pop, fitnesses):
     ind.fitness.values = fit
 
   fits = [ind.fitness.values[0] for ind in pop]
 
   gen = 0
-  while gen < 50:#1000:
+  while gen < 20:
   #while max(fits) < 100 and gen < 1000:
     gen += 1
     print("Generation %d" % gen)
@@ -96,15 +173,25 @@ def main(remote):
     for mutant in offspring:
       if random.random() < MUTPB:
         toolbox.mutate(mutant)
+        for m in mutant:
+            if m < -5.0: m = -5.0
+            if m > 5.0:  m = 5.0
         del mutant.fitness.values
 
     invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
 
     if remote:
       #fitnesses = list(ThreadPool(20).imap_unordered(evalRemoteWeights, invalid_ind))
-      fitnesses = pool.map(evalRemoteWeights, pop)
+      #fitnesses = pool.map(evalRemoteWeights, pop)
+      # Turn population into CF URLs
+      pop_urls = []
+      for indv in pop:
+        pop_urls.append('%s?x0=%f&x1=%f' % (url, indv[0], indv[1]))
+       # pop_urls.append('%s?x0=%f&x1=%f&x2=%f&x3=%f&x4=%f&x5=%f' % (url,indv[0],indv[1],indv[2],indv[3],indv[4],indv[5]))
+      fitnesses = asyncio.run(evalAsync(pop=pop_urls))
     else:
-      fitnesses = map(toolbox.evaluate, invalid_ind)
+      fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
+      #fitnesses = map(toolbox.evaluate, invalid_ind)
     for ind, fit in zip(invalid_ind, fitnesses):
       ind.fitness.values = fit
 
@@ -121,14 +208,15 @@ def main(remote):
     print("* Avg: %s" % mean)
     print("* Std: %s" % std)
     best = tools.selBest(pop, 1)[0]
-    print("* Best: %s, %s, %s" % (best, best.fitness.values, evalWeights(best)))
+    print("* Best: %s, %s, %s" % (best, best.fitness.values, eval2DPhysics(best)))
 
-  print "Done."
+  print("Done.")
   best_ind = tools.selBest(pop, 1)[0]
   print("Best individual: %s, %s" % (best_ind, best_ind.fitness.values))
 
 if __name__ == '__main__':
-  args = parser.parse_args()
+  assert sys.version_info >= (3, 7), "Requires Python 3.7+"
+  #os.environ['SDL_VIDEODRIVER'] = 'dummy' # Run pygame headless
   main(args.remote)
 
 
@@ -159,3 +247,4 @@ for url, html, error in results:
 print("Elapsed time: %s" % (timer() - start,))
 """
 
+# real    3m51.628s
