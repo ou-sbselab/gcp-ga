@@ -26,15 +26,26 @@ from aiohttp import ClientSession
 
 import os
 
-# 107m31.432s
 
 parser = argparse.ArgumentParser(description='Executes Cloud-GA')
 parser.add_argument('--remote',
                     help='Call GCP instead of local.',
                     action='store_true')
+parser.add_argument('--gens',
+                    help='Number of generations to run.',
+                    type=int,
+                    default=2)
+parser.add_argument('--pop_size',
+                    help='Population size per generation.',
+                    type=int,
+                    default=5)
+parser.add_argument('--save_frames',
+                    help='Write frames to file.',
+                    action='store_true')
+
 args = parser.parse_args()
-if not args.remote:
-  from bouncing_balls import BouncyBalls
+#if not args.remote:
+from bouncing_balls import BouncyBalls
 
 url = 'https://us-central1-parallelea.cloudfunctions.net/ea-test-pymunk'
 #url = "https://us-central1-parallelea.cloudfunctions.net/ea-test-ackley"
@@ -130,8 +141,8 @@ async def evalAsync(pop: set, **kwargs) -> None:
       )
     return await asyncio.gather(*tasks)
 
-def main(remote):
-  pop = toolbox.population(n=20)#300)
+def main(remote, gens, pop_size, save_frames=False):
+  pop = toolbox.population(n=pop_size)
   CXPB, MUTPB = 0.5, 0.2
   #url = 'https://us-central1-parallelea.cloudfunctions.net/ea-test2' --> global now
   #pool = mpc.Pool(processes=12)
@@ -155,7 +166,7 @@ def main(remote):
   fits = [ind.fitness.values[0] for ind in pop]
 
   gen = 0
-  while gen < 20:
+  while gen < gens:
   #while max(fits) < 100 and gen < 1000:
     gen += 1
     print("Generation %d" % gen)
@@ -185,7 +196,7 @@ def main(remote):
       #fitnesses = pool.map(evalRemoteWeights, pop)
       # Turn population into CF URLs
       pop_urls = []
-      for indv in pop:
+      for indv in invalid_ind:#pop:
         pop_urls.append('%s?x0=%f&x1=%f' % (url, indv[0], indv[1]))
        # pop_urls.append('%s?x0=%f&x1=%f&x2=%f&x3=%f&x4=%f&x5=%f' % (url,indv[0],indv[1],indv[2],indv[3],indv[4],indv[5]))
       fitnesses = asyncio.run(evalAsync(pop=pop_urls))
@@ -216,8 +227,9 @@ def main(remote):
 
 if __name__ == '__main__':
   assert sys.version_info >= (3, 7), "Requires Python 3.7+"
-  #os.environ['SDL_VIDEODRIVER'] = 'dummy' # Run pygame headless
-  main(args.remote)
+  main(args.remote, args.gens, args.pop_size, args.save_frames)
+
+  #8m2.337s
 
 
 """ WORKING 
