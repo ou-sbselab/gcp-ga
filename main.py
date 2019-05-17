@@ -1,7 +1,6 @@
 from multiprocessing.pool import ThreadPool
 import multiprocessing as mpc
 from time import time as timer
-#from urllib2 import urlopen
 import math
 
 import array
@@ -44,13 +43,11 @@ parser.add_argument('--save_frames',
                     action='store_true')
 
 args = parser.parse_args()
-#if not args.remote:
 from bouncing_balls import BouncyBalls
 
 url = 'https://us-central1-parallelea.cloudfunctions.net/ea-test-pymunk'
-#url = "https://us-central1-parallelea.cloudfunctions.net/ea-test-ackley"
-#url = "https://us-central1-parallelea.cloudfunctions.net/ea-test2"
 
+# Optimize Ackley function
 def evalAckley(individual): # indv: [x,y] where -5 < x,y < 5 
   x = individual[0]
   y = individual[1]
@@ -61,34 +58,21 @@ def evalAckley(individual): # indv: [x,y] where -5 < x,y < 5
         math.e + 20.
   return val,
 
-def eval2DPhysics(individual): #TBD - do something with indiv!
-  os.environ['SDL_VIDEODRIVER'] = 'dummy' # Run pygame headless
-  game = BouncyBalls()
-  game.run()
-  return random.random(),
+# Draw two random lines with the intent of maximizing the number of balls 
+# on the screen
+def eval2DPhysics(individual, last=False): #TBD - do something with indiv!
+  if not last:
+    os.environ['SDL_VIDEODRIVER'] = 'dummy' # Run pygame headless
+  else:
+    os.environ['SDL_VIDEODRIVER'] = 'x11'   # Run pygame headfull?
+
+  l1 = (individual[0],individual[1],individual[2],individual[3])
+  l2 = (individual[4],individual[5],individual[6],individual[7])
+  game = BouncyBalls(l1,l2)
+  return game.run(),
 
 def evalOneMax(individual):
   return sum(individual),
-
-def evalWeights(individual):
-  equation_inputs = [4,-2,3.5,5,-11,-4.7]
-  s = 0.0
-  for i in range(len(individual)):
-    s += individual[i] * equation_inputs[i]
-  return s,
-
-async def evalRemoteWeights(individual):
-  indv = ""
-  for i in range(len(individual)):
-    indv += indv + "&x%d=%f" % (i, individual[i])
-  indv_url = url + "?" + indv
-  
-  try:
-    response = urlopen(indv_url)
-    fit = float(response.read())
-    return fit,
-  except Exception as e:
-    return -9999.99,
 
 creator.create("FitnessMax", base.Fitness, weights=(1.0,))
 creator.create("Individual", list, fitness=creator.FitnessMax)
@@ -96,21 +80,19 @@ creator.create("Individual", list, fitness=creator.FitnessMax)
 toolbox = base.Toolbox()
 
 toolbox.register("attr_float", random.uniform, -5.0, 5.0)
-#toolbox.register("attr_bool", random.randint, 0, 1)
-toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_float, 2)
+toolbox.register("attr_int", random.randint, 0, 600) #make pair if not square resolution
+toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_int, 8)
 toolbox.register("population", tools.initRepeat, list, toolbox.individual)
 
  
 pool = mpc.Pool()
 toolbox.register("map", pool.map)
-
-toolbox.register("evaluate", eval2DPhysics)#evalAckley)#evalWeights)#evalOneMax)
+toolbox.register("evaluate", eval2DPhysics)
 toolbox.register("mate", tools.cxTwoPoint)
-#toolbox.register("mate", tools.cxTwoPoint)
 toolbox.register("mutate", tools.mutGaussian, mu=0.0, sigma=0.2, indpb=0.2)
-#toolbox.register("mutate", tools.mutFlipBit, indpb=0.05)
 toolbox.register("select", tools.selTournament, tournsize=3)
 
+# AsyncIO functions for interacting with Google Cloud Functions
 async def fetchCF(indv: str, session: ClientSession, **kwargs) -> str:
   resp = await session.request(method="GET", url=indv, **kwargs)
   resp.raise_for_status()
@@ -141,33 +123,35 @@ async def evalAsync(pop: set, **kwargs) -> None:
       )
     return await asyncio.gather(*tasks)
 
+# Write out invalid indices per generation
+def writepop(gen,pop):
+    with open('checkvals.txt','a') as f:
+        f.write('Generation %d\n' % gen)
+        for p in pop:
+            f.write(str(p)+'\n')
+        f.write('======================\n')
+
+
 def main(remote, gens, pop_size, save_frames=False):
   pop = toolbox.population(n=pop_size)
   CXPB, MUTPB = 0.5, 0.2
-  #url = 'https://us-central1-parallelea.cloudfunctions.net/ea-test2' --> global now
-  #pool = mpc.Pool(processes=12)
 
   if remote:
     # Turn population into CF URLs
     pop_urls = []
     for indv in pop:
       pop_urls.append('%s?x0=%f&x1=%f' % (url, indv[0], indv[1]))
-      #pop_urls.append('%s?x0=%f&x1=%f&x2=%f&x3=%f&x4=%f&x5=%f' % (url,indv[0],indv[1],indv[2],indv[3],indv[4],indv[5]))
     fitnesses = asyncio.run(evalAsync(pop=pop_urls))
-
-    #fitnesses = pool.map(evalRemoteWeights, pop)
-    #fitnesses = list(ThreadPool(20).imap_unordered(evalRemoteWeights, pop))
   else:
     fitnesses = toolbox.map(toolbox.evaluate, pop)
-    #fitnesses = list(map(toolbox.evaluate, pop))
+
+  # Copy fitnesses to population
   for ind, fit in zip(pop, fitnesses):
     ind.fitness.values = fit
-
   fits = [ind.fitness.values[0] for ind in pop]
 
   gen = 0
   while gen < gens:
-  #while max(fits) < 100 and gen < 1000:
     gen += 1
     print("Generation %d" % gen)
 
@@ -181,6 +165,7 @@ def main(remote, gens, pop_size, save_frames=False):
         del c1.fitness.values
         del c2.fitness.values
 
+    # Mutation
     for mutant in offspring:
       if random.random() < MUTPB:
         toolbox.mutate(mutant)
@@ -191,24 +176,23 @@ def main(remote, gens, pop_size, save_frames=False):
 
     invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
 
-    if remote:
-      #fitnesses = list(ThreadPool(20).imap_unordered(evalRemoteWeights, invalid_ind))
-      #fitnesses = pool.map(evalRemoteWeights, pop)
-      # Turn population into CF URLs
+    if remote: # Turn population into CF URLs and call remote functions
       pop_urls = []
-      for indv in invalid_ind:#pop:
+      for indv in invalid_ind:
         pop_urls.append('%s?x0=%f&x1=%f' % (url, indv[0], indv[1]))
-       # pop_urls.append('%s?x0=%f&x1=%f&x2=%f&x3=%f&x4=%f&x5=%f' % (url,indv[0],indv[1],indv[2],indv[3],indv[4],indv[5]))
       fitnesses = asyncio.run(evalAsync(pop=pop_urls))
+
+    # Otherwise, evaluate locally via MPC
     else:
       fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
-      #fitnesses = map(toolbox.evaluate, invalid_ind)
+
     for ind, fit in zip(invalid_ind, fitnesses):
       ind.fitness.values = fit
 
     pop[:] = offspring
     fits = [ind.fitness.values[0] for ind in pop]
 
+    # Print statistics
     length = len(pop)
     mean = sum(fits) / length
     sum2 = sum(x*x for x in fits)
@@ -219,44 +203,14 @@ def main(remote, gens, pop_size, save_frames=False):
     print("* Avg: %s" % mean)
     print("* Std: %s" % std)
     best = tools.selBest(pop, 1)[0]
-    print("* Best: %s, %s, %s" % (best, best.fitness.values, eval2DPhysics(best)))
+    print("* Best: %s, %s" % (best, best.fitness.values))#, eval2DPhysics(best, True)))
+
+    writepop(gen,invalid_ind)
 
   print("Done.")
   best_ind = tools.selBest(pop, 1)[0]
-  print("Best individual: %s, %s" % (best_ind, best_ind.fitness.values))
+  print("Best individual: %s, %s, %s" % (best_ind, best_ind.fitness.values, eval2DPhysics(best_ind, True)))
 
 if __name__ == '__main__':
   assert sys.version_info >= (3, 7), "Requires Python 3.7+"
   main(args.remote, args.gens, args.pop_size, args.save_frames)
-
-  #8m2.337s
-
-
-""" WORKING 
-gens = 50
-pop  = 100
-
-url = "https://us-central1-parallelea.cloudfunctions.net/ea-test2"
-gen = 0
-indvs = ["%s?gen=%d&indv=%d" % (url, gen, i) for i in range(pop)]
-
-def fetch_url(url):
-  try:
-    response = urlopen(url)
-    return url, response.read(), None
-  except Exception as e:
-    return url, None, e
-
-start = timer()
-results = ThreadPool(20).imap_unordered(fetch_url, indvs)
-for url, html, error in results:
-  if error is None:
-    #print("%r fetched in %ss" % (url, timer() - start))
-    print("[%s fetched in %ss]" % (url, timer() - start))
-    print("Response: %s" % html)
-  else:
-    print("Error fetching %r: %s" % (url, error))
-print("Elapsed time: %s" % (timer() - start,))
-"""
-
-# real    3m51.628s

@@ -25,10 +25,13 @@ class BouncyBalls(object):
     This class implements a simple scene in which there is a static platform (made up of a couple of lines)
     that don't move. Balls appear occasionally and drop onto the platform. They bounce around.
     """
-    def __init__(self):
+    def __init__(self, line1, line2):
         # Space
         self._space = pymunk.Space()
-        self._space.gravity = (0.0, random.uniform(-200.0,-900.0)) #-900.0)
+        self._space.gravity = (0.0, -900.0)
+
+        self._line1 = line1
+        self._line2 = line2
 
         # Physics
         # Time step
@@ -75,6 +78,7 @@ class BouncyBalls(object):
 
             if pygame.time.get_ticks() > 120000:
                 self._running = False
+        return len(self._balls)
 
     def _add_static_scenery(self):
         """
@@ -82,8 +86,12 @@ class BouncyBalls(object):
         :return: None
         """
         static_body = self._space.static_body
-        static_lines = [pymunk.Segment(static_body, (111.0, 280.0), (407.0, 246.0), 0.0),
-                        pymunk.Segment(static_body, (407.0, 246.0), (407.0, 343.0), 0.0)]
+        static_lines = [pymunk.Segment(static_body, (self._line1[0],self._line1[1]), \
+                                                    (self._line1[2],self._line1[3]), 0.0),
+                        pymunk.Segment(static_body, (self._line2[0],self._line2[1]), \
+                                                    (self._line2[2],self._line2[3]), 0.0)]
+        #static_lines = [pymunk.Segment(static_body, (111.0, 280.0), (407.0, 246.0), 0.0),
+        #                pymunk.Segment(static_body, (407.0, 246.0), (407.0, 343.0), 0.0)]
         for line in static_lines:
             line.elasticity = 0.95
             line.friction = 0.9
@@ -148,8 +156,7 @@ class BouncyBalls(object):
         """
         self._space.debug_draw(self._draw_options)
 
-
 if __name__ == '__main__':
     game = BouncyBalls()
     game.run()
-    print('Done.')
+    print('BouncyBalls - Done.')
