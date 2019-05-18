@@ -79,7 +79,7 @@ creator.create("Individual", list, fitness=creator.FitnessMax)
 
 toolbox = base.Toolbox()
 
-toolbox.register("attr_float", random.uniform, -5.0, 5.0)
+#toolbox.register("attr_float", random.uniform, -5.0, 5.0)
 toolbox.register("attr_int", random.randint, 0, 600) #make pair if not square resolution
 toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_int, 8)
 toolbox.register("population", tools.initRepeat, list, toolbox.individual)
@@ -89,7 +89,8 @@ pool = mpc.Pool()
 toolbox.register("map", pool.map)
 toolbox.register("evaluate", eval2DPhysics)
 toolbox.register("mate", tools.cxTwoPoint)
-toolbox.register("mutate", tools.mutGaussian, mu=0.0, sigma=0.2, indpb=0.2)
+toolbox.register("mutate", tools.mutUniformInt, low=0, up=600, indpb=0.2)
+#toolbox.register("mutate", tools.mutGaussian, mu=0.0, sigma=0.2, indpb=0.2)
 toolbox.register("select", tools.selTournament, tournsize=3)
 
 # AsyncIO functions for interacting with Google Cloud Functions
@@ -170,8 +171,8 @@ def main(remote, gens, pop_size, save_frames=False):
       if random.random() < MUTPB:
         toolbox.mutate(mutant)
         for m in mutant:
-            if m < -5.0: m = -5.0
-            if m > 5.0:  m = 5.0
+            if m < 0.0: m = 0.0
+            if m > 600.0:  m = 600.0
         del mutant.fitness.values
 
     invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
@@ -192,6 +193,8 @@ def main(remote, gens, pop_size, save_frames=False):
     pop[:] = offspring
     fits = [ind.fitness.values[0] for ind in pop]
 
+    print("%d invalid indices evaluated" % len(invalid_ind))
+
     # Print statistics
     length = len(pop)
     mean = sum(fits) / length
@@ -205,7 +208,7 @@ def main(remote, gens, pop_size, save_frames=False):
     best = tools.selBest(pop, 1)[0]
     print("* Best: %s, %s" % (best, best.fitness.values))#, eval2DPhysics(best, True)))
 
-    writepop(gen,invalid_ind)
+    #writepop(gen,invalid_ind)
 
   print("Done.")
   best_ind = tools.selBest(pop, 1)[0]

@@ -33,6 +33,8 @@ class BouncyBalls(object):
         self._line1 = line1
         self._line2 = line2
 
+        #print(self._line1,self._line2)
+
         # Physics
         # Time step
         self._dt = 1.0 / 60.0
@@ -76,7 +78,7 @@ class BouncyBalls(object):
             self._clock.tick(50)
             pygame.display.set_caption("fps: " + str(self._clock.get_fps()))
 
-            if pygame.time.get_ticks() > 120000:
+            if pygame.time.get_ticks() > 60000:#120000:
                 self._running = False
         return len(self._balls)
 
@@ -86,10 +88,10 @@ class BouncyBalls(object):
         :return: None
         """
         static_body = self._space.static_body
-        static_lines = [pymunk.Segment(static_body, (self._line1[0],self._line1[1]), \
-                                                    (self._line1[2],self._line1[3]), 0.0),
-                        pymunk.Segment(static_body, (self._line2[0],self._line2[1]), \
-                                                    (self._line2[2],self._line2[3]), 0.0)]
+        static_lines = [pymunk.Segment(static_body, (int(self._line1[0]),int(self._line1[1])), \
+                                                    (int(self._line1[2]),int(self._line1[3])), 0.0),
+                        pymunk.Segment(static_body, (int(self._line2[0]),int(self._line2[1])), \
+                                                    (int(self._line2[2]),int(self._line2[3])), 0.0)]
         #static_lines = [pymunk.Segment(static_body, (111.0, 280.0), (407.0, 246.0), 0.0),
         #                pymunk.Segment(static_body, (407.0, 246.0), (407.0, 343.0), 0.0)]
         for line in static_lines:
