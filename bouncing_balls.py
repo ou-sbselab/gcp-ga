@@ -15,20 +15,43 @@ from pygame.locals import *
 from pygame.color import *
 
 # pymunk imports
+import pymunkoptions
+pymunkoptions.options['debug'] = False
 import pymunk
 import pymunk.pygame_util
 import os
+import sys
+import argparse
 
+parser = argparse.ArgumentParser(description='Executes Cloud-GA')
+parser.add_argument('--x0', type=float)
+parser.add_argument('--x1', type=float)
+parser.add_argument('--x2', type=float)
+parser.add_argument('--x3', type=float)
+parser.add_argument('--y0', type=float)
+parser.add_argument('--y1', type=float)
+parser.add_argument('--y2', type=float)
+parser.add_argument('--y3', type=float)
+parser.add_argument('--id', type=str)
+parser.add_argument('--seed', type=int, default=1)
+
+os.environ['SDL_AUDIODRIVER']            = 'dsp' # fix ALSA error
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'   # Hide PyGame messages
 
 class BouncyBalls(object):
     """
     This class implements a simple scene in which there is a static platform (made up of a couple of lines)
     that don't move. Balls appear occasionally and drop onto the platform. They bounce around.
     """
-    def __init__(self, line1, line2):
+    def __init__(self, args):#line1, line2):
         # Space
         self._space = pymunk.Space()
         self._space.gravity = (0.0, -900.0)
+
+        self._args = args
+
+        line1 = (args.x0, args.y0, args.x1, args.y1)
+        line2 = (args.x2, args.y2, args.x3, args.y3)
 
         self._line1 = line1
         self._line2 = line2
@@ -79,8 +102,9 @@ class BouncyBalls(object):
             pygame.display.set_caption("fps: " + str(self._clock.get_fps()))
 
             if pygame.time.get_ticks() > 60000:#120000:
+                #pygame.image.save(self._screen, '%s-lastframe.png' % self._args.id)
                 self._running = False
-        return len(self._balls)
+        return str(len(self._balls))
 
     def _add_static_scenery(self):
         """
@@ -159,6 +183,9 @@ class BouncyBalls(object):
         self._space.debug_draw(self._draw_options)
 
 if __name__ == '__main__':
-    game = BouncyBalls()
-    game.run()
-    print('BouncyBalls - Done.')
+    args = parser.parse_args()
+    random.seed(args.seed)
+    game = BouncyBalls(args)
+
+    # Print to stdout to return value back
+    print(game.run())

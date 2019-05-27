@@ -24,6 +24,13 @@ import aiohttp
 from aiohttp import ClientSession
 
 import os
+import sys
+#from subprocess import call
+from subprocess import PIPE, run
+
+os.environ['SDL_AUDIODRIVER']            = 'dsp' # fix ALSA error
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'   # Hide PyGame messages
+os.environ['SDL_VIDEODRIVER']            = 'dummy' # Run pygame headless
 
 
 parser = argparse.ArgumentParser(description='Executes Cloud-GA')
@@ -41,6 +48,10 @@ parser.add_argument('--pop_size',
 parser.add_argument('--save_frames',
                     help='Write frames to file.',
                     action='store_true')
+parser.add_argument('--seed',
+                    help='Seed value sent across files.',
+                    type=int,
+                    default=1)
 
 args = parser.parse_args()
 from bouncing_balls import BouncyBalls
@@ -60,16 +71,34 @@ def evalAckley(individual): # indv: [x,y] where -5 < x,y < 5
 
 # Draw two random lines with the intent of maximizing the number of balls 
 # on the screen
-def eval2DPhysics(individual, last=False): #TBD - do something with indiv!
+def eval2DPhysics(individual, last=False): 
+  os.environ['SDL_AUDIODRIVER']            = 'dsp' # fix ALSA error
+  os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'   # Hide PyGame messages
   if not last:
     os.environ['SDL_VIDEODRIVER'] = 'dummy' # Run pygame headless
   else:
     os.environ['SDL_VIDEODRIVER'] = 'x11'   # Run pygame headfull?
 
-  l1 = (individual[0],individual[1],individual[2],individual[3])
-  l2 = (individual[4],individual[5],individual[6],individual[7])
-  game = BouncyBalls(l1,l2)
-  return game.run(),
+#  shell_command = 'python3 bouncing_balls.py --x0 %f --y0 %f --x1 %f --y1 %f --x2 %f --y2 %f --x3 %f --y3 %f' % (individual[0], individual[1], individual[2], individual[3], individual[4], individual[5], individual[6], individual[7])
+#  call(shell_command, shell=True, stdin=None, stdout=None, stderr=None)
+#  l1 = (individual[0],individual[1],individual[2],individual[3])
+#  l2 = (individual[4],individual[5],individual[6],individual[7])
+#  game = BouncyBalls(l1,l2)
+#  return game.run(),
+  shell_cmd = ['python3','bouncing_balls.py',\
+               '--seed', str(args.seed),    \
+               '--x0', str(individual[0]), \
+               '--y0', str(individual[1]), \
+               '--x1', str(individual[2]), \
+               '--y1', str(individual[3]), \
+               '--x2', str(individual[4]), \
+               '--y2', str(individual[5]), \
+               '--x3', str(individual[6]), \
+               '--y3', str(individual[7])]
+  result = run(shell_cmd, stdout=PIPE, stderr=PIPE, text=True)
+  # Need to use STDERR as the return because PyMunk doesn't seem to allow suppression of its
+  # loading message.
+  return int(result.stdout.strip()), 
 
 def evalOneMax(individual):
   return sum(individual),
@@ -85,13 +114,15 @@ toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.att
 toolbox.register("population", tools.initRepeat, list, toolbox.individual)
 
  
-pool = mpc.Pool()
+pool = mpc.Pool(8)
 toolbox.register("map", pool.map)
 toolbox.register("evaluate", eval2DPhysics)
 toolbox.register("mate", tools.cxTwoPoint)
 toolbox.register("mutate", tools.mutUniformInt, low=0, up=600, indpb=0.2)
 #toolbox.register("mutate", tools.mutGaussian, mu=0.0, sigma=0.2, indpb=0.2)
 toolbox.register("select", tools.selTournament, tournsize=3)
+
+
 
 # AsyncIO functions for interacting with Google Cloud Functions
 async def fetchCF(indv: str, session: ClientSession, **kwargs) -> str:
@@ -100,6 +131,7 @@ async def fetchCF(indv: str, session: ClientSession, **kwargs) -> str:
   html = await resp.text()
   return html
 
+# Dispatch the CFs and return fitness
 async def callCF(indv: str, session: ClientSession, **kwargs) -> float:
   try:
     html = await fetchCF(indv=indv, session=session, **kwargs)
@@ -108,19 +140,21 @@ async def callCF(indv: str, session: ClientSession, **kwargs) -> float:
     aiohttp.http_exceptions.HttpProcessingError,
   ) as e:
     #return "Error processing [%s]" % indv
+    print(indv,e)
     return -9999.99,
   else:
-    if html == 'Done.':
-      return 1.0,#float(html),
-    else:
-      return random.uniform(0.0,0.9),
+    return int(html),
 
+# Called via GA
 async def evalAsync(pop: set, **kwargs) -> None:
   async with ClientSession() as session:
     tasks = []
     for p in pop:
+      #print(p)
+      indv_url = '%s?seed=%d&x0=%d&y0=%d&x1=%d&y1=%d&x2=%d&y2=%d&x3=%d&y3=%d' % \
+                 (url,args.seed,int(p[0]),int(p[1]),int(p[2]),int(p[3]),int(p[4]),int(p[5]),int(p[6]),int(p[7]))
       tasks.append(
-        callCF(indv=p,session=session,**kwargs)
+        callCF(indv=indv_url,session=session,**kwargs)
       )
     return await asyncio.gather(*tasks)
 
@@ -138,11 +172,8 @@ def main(remote, gens, pop_size, save_frames=False):
   CXPB, MUTPB = 0.5, 0.2
 
   if remote:
-    # Turn population into CF URLs
-    pop_urls = []
-    for indv in pop:
-      pop_urls.append('%s?x0=%f&x1=%f' % (url, indv[0], indv[1]))
-    fitnesses = asyncio.run(evalAsync(pop=pop_urls))
+    fitnesses = asyncio.run(evalAsync(pop))
+    print("Fitnesses:",fitnesses)
   else:
     fitnesses = toolbox.map(toolbox.evaluate, pop)
 
@@ -171,17 +202,15 @@ def main(remote, gens, pop_size, save_frames=False):
       if random.random() < MUTPB:
         toolbox.mutate(mutant)
         for m in mutant:
-            if m < 0.0: m = 0.0
-            if m > 600.0:  m = 600.0
+            if m < 0:    m = 0
+            if m > 600:  m = 600
         del mutant.fitness.values
 
     invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
 
     if remote: # Turn population into CF URLs and call remote functions
-      pop_urls = []
-      for indv in invalid_ind:
-        pop_urls.append('%s?x0=%f&x1=%f' % (url, indv[0], indv[1]))
-      fitnesses = asyncio.run(evalAsync(pop=pop_urls))
+      fitnesses = asyncio.run(evalAsync(invalid_ind))
+      print(fitnesses)
 
     # Otherwise, evaluate locally via MPC
     else:
