@@ -160,7 +160,7 @@ class BouncyBalls(object):
         radius = 25
         inertia = pymunk.moment_for_circle(mass, 0, radius, (0, 0))
         body = pymunk.Body(mass, inertia)
-        x = random.randint(115, 350)
+        x = 200#random.randint(115, 350)
         body.position = x, 400
         shape = pymunk.Circle(body, radius, (0, 0))
         shape.elasticity = 0.95

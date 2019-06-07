@@ -55,6 +55,7 @@ parser.add_argument('--seed',
 
 args = parser.parse_args()
 from bouncing_balls import BouncyBalls
+random.seed(args.seed)
 
 url = 'https://us-central1-parallelea.cloudfunctions.net/ea-test-pymunk'
 
@@ -96,8 +97,7 @@ def eval2DPhysics(individual, last=False):
                '--x3', str(individual[6]), \
                '--y3', str(individual[7])]
   result = run(shell_cmd, stdout=PIPE, stderr=PIPE, text=True)
-  # Need to use STDERR as the return because PyMunk doesn't seem to allow suppression of its
-  # loading message.
+  print(shell_cmd,result)
   return int(result.stdout.strip()), 
 
 def evalOneMax(individual):
