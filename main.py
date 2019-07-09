@@ -32,7 +32,6 @@ os.environ['SDL_AUDIODRIVER']            = 'dsp' # fix ALSA error
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'   # Hide PyGame messages
 os.environ['SDL_VIDEODRIVER']            = 'dummy' # Run pygame headless
 
-
 parser = argparse.ArgumentParser(description='Executes Cloud-GA')
 parser.add_argument('--remote',
                     help='Call GCP instead of local.',
@@ -59,17 +58,6 @@ random.seed(args.seed)
 
 url = 'https://us-central1-parallelea.cloudfunctions.net/ea-test-pymunk'
 
-# Optimize Ackley function
-def evalAckley(individual): # indv: [x,y] where -5 < x,y < 5 
-  x = individual[0]
-  y = individual[1]
-  val = -20.                                            * \
-        math.exp(-0.2 * math.sqrt(0.5 * (x**2 + y**2))) - \
-        math.exp(0.5 * (math.cos(2. * math.pi * x)      + \
-                        math.cos(2. * math.pi * y)))    + \
-        math.e + 20.
-  return val,
-
 # Draw two random lines with the intent of maximizing the number of balls 
 # on the screen
 def eval2DPhysics(individual, last=False): 
@@ -80,12 +68,6 @@ def eval2DPhysics(individual, last=False):
   else:
     os.environ['SDL_VIDEODRIVER'] = 'x11'   # Run pygame headfull?
 
-#  shell_command = 'python3 bouncing_balls.py --x0 %f --y0 %f --x1 %f --y1 %f --x2 %f --y2 %f --x3 %f --y3 %f' % (individual[0], individual[1], individual[2], individual[3], individual[4], individual[5], individual[6], individual[7])
-#  call(shell_command, shell=True, stdin=None, stdout=None, stderr=None)
-#  l1 = (individual[0],individual[1],individual[2],individual[3])
-#  l2 = (individual[4],individual[5],individual[6],individual[7])
-#  game = BouncyBalls(l1,l2)
-#  return game.run(),
   shell_cmd = ['python3','bouncing_balls.py',\
                '--seed', str(args.seed),    \
                '--x0', str(individual[0]), \
@@ -95,34 +77,29 @@ def eval2DPhysics(individual, last=False):
                '--x2', str(individual[4]), \
                '--y2', str(individual[5]), \
                '--x3', str(individual[6]), \
-               '--y3', str(individual[7])]
+               '--y3', str(individual[7]), \
+               '--emitX', str(individual[8]), \
+               '--emitY', str(individual[9])]
   result = run(shell_cmd, stdout=PIPE, stderr=PIPE, text=True)
   print(shell_cmd,result)
   return int(result.stdout.strip()), 
 
-def evalOneMax(individual):
-  return sum(individual),
 
+# DEAP variables
 creator.create("FitnessMax", base.Fitness, weights=(1.0,))
 creator.create("Individual", list, fitness=creator.FitnessMax)
-
 toolbox = base.Toolbox()
 
-#toolbox.register("attr_float", random.uniform, -5.0, 5.0)
 toolbox.register("attr_int", random.randint, 0, 600) #make pair if not square resolution
-toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_int, 8)
+toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_int, 10)
 toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-
  
 pool = mpc.Pool(8)
 toolbox.register("map", pool.map)
 toolbox.register("evaluate", eval2DPhysics)
 toolbox.register("mate", tools.cxTwoPoint)
 toolbox.register("mutate", tools.mutUniformInt, low=0, up=600, indpb=0.2)
-#toolbox.register("mutate", tools.mutGaussian, mu=0.0, sigma=0.2, indpb=0.2)
 toolbox.register("select", tools.selTournament, tournsize=3)
-
-
 
 # AsyncIO functions for interacting with Google Cloud Functions
 async def fetchCF(indv: str, session: ClientSession, **kwargs) -> str:
@@ -132,27 +109,26 @@ async def fetchCF(indv: str, session: ClientSession, **kwargs) -> str:
   return html
 
 # Dispatch the CFs and return fitness
-async def callCF(indv: str, session: ClientSession, **kwargs) -> float:
+async def callCF(indv: str, session: ClientSession, **kwargs) -> int:#float:
   try:
     html = await fetchCF(indv=indv, session=session, **kwargs)
   except (
     aiohttp.ClientError,
     aiohttp.http_exceptions.HttpProcessingError,
   ) as e:
-    #return "Error processing [%s]" % indv
     print(indv,e)
-    return -9999.99,
+    return -9999,
   else:
     return int(html),
 
 # Called via GA
 async def evalAsync(pop: set, **kwargs) -> None:
-  async with ClientSession() as session:
+  async with ClientSession(read_timeout=None) as session:
     tasks = []
     for p in pop:
       #print(p)
-      indv_url = '%s?seed=%d&x0=%d&y0=%d&x1=%d&y1=%d&x2=%d&y2=%d&x3=%d&y3=%d' % \
-                 (url,args.seed,int(p[0]),int(p[1]),int(p[2]),int(p[3]),int(p[4]),int(p[5]),int(p[6]),int(p[7]))
+      indv_url = '%s?seed=%d&x0=%d&y0=%d&x1=%d&y1=%d&x2=%d&y2=%d&x3=%d&y3=%d&emitX=%d&emitY=%d' % \
+                 (url,args.seed,int(p[0]),int(p[1]),int(p[2]),int(p[3]),int(p[4]),int(p[5]),int(p[6]),int(p[7]),int(p[8]),int(p[9]))
       tasks.append(
         callCF(indv=indv_url,session=session,**kwargs)
       )
@@ -182,6 +158,7 @@ def main(remote, gens, pop_size, save_frames=False):
     ind.fitness.values = fit
   fits = [ind.fitness.values[0] for ind in pop]
 
+  # Generational loop
   gen = 0
   while gen < gens:
     gen += 1
@@ -210,12 +187,22 @@ def main(remote, gens, pop_size, save_frames=False):
 
     if remote: # Turn population into CF URLs and call remote functions
       fitnesses = asyncio.run(evalAsync(invalid_ind))
+      print("===")
+      for ind in invalid_ind:
+        print(ind)
       print(fitnesses)
+      print("===")
 
     # Otherwise, evaluate locally via MPC
     else:
       fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
+      print("===")
+      for ind in invalid_ind:
+        print(ind)
+      print(fitnesses)
+      print("===")
 
+    # Save fitnesses
     for ind, fit in zip(invalid_ind, fitnesses):
       ind.fitness.values = fit
 
@@ -235,14 +222,14 @@ def main(remote, gens, pop_size, save_frames=False):
     print("* Avg: %s" % mean)
     print("* Std: %s" % std)
     best = tools.selBest(pop, 1)[0]
-    print("* Best: %s, %s" % (best, best.fitness.values))#, eval2DPhysics(best, True)))
+    print("* Best: %s, %s" % (best, best.fitness.values))
 
-    #writepop(gen,invalid_ind)
 
   print("Done.")
   best_ind = tools.selBest(pop, 1)[0]
   print("Best individual: %s, %s, %s" % (best_ind, best_ind.fitness.values, eval2DPhysics(best_ind, True)))
 
+# Entry point
 if __name__ == '__main__':
   assert sys.version_info >= (3, 7), "Requires Python 3.7+"
   main(args.remote, args.gens, args.pop_size, args.save_frames)

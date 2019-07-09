@@ -24,15 +24,18 @@ import sys
 import argparse
 
 parser = argparse.ArgumentParser(description='Executes Cloud-GA')
-parser.add_argument('--x0', type=float)
-parser.add_argument('--x1', type=float)
-parser.add_argument('--x2', type=float)
-parser.add_argument('--x3', type=float)
-parser.add_argument('--y0', type=float)
-parser.add_argument('--y1', type=float)
-parser.add_argument('--y2', type=float)
-parser.add_argument('--y3', type=float)
+parser.add_argument('--x0', type=int)
+parser.add_argument('--x1', type=int)
+parser.add_argument('--x2', type=int)
+parser.add_argument('--x3', type=int)
+parser.add_argument('--y0', type=int)
+parser.add_argument('--y1', type=int)
+parser.add_argument('--y2', type=int)
+parser.add_argument('--y3', type=int)
+parser.add_argument('--emitX', type=int)
+parser.add_argument('--emitY', type=int)
 parser.add_argument('--id', type=str)
+parser.add_argument('--save_frame', action='store_true')
 parser.add_argument('--seed', type=int, default=1)
 
 os.environ['SDL_AUDIODRIVER']            = 'dsp' # fix ALSA error
@@ -52,6 +55,9 @@ class BouncyBalls(object):
 
         line1 = (args.x0, args.y0, args.x1, args.y1)
         line2 = (args.x2, args.y2, args.x3, args.y3)
+
+        self._emitX = args.emitX
+        self._emitY = args.emitY
 
         self._line1 = line1
         self._line2 = line2
@@ -104,6 +110,10 @@ class BouncyBalls(object):
             if pygame.time.get_ticks() > 60000:#120000:
                 #pygame.image.save(self._screen, '%s-lastframe.png' % self._args.id)
                 self._running = False
+
+                if args.save_frame:
+                  fname = '%d_%d_%d_%d_%d_%d_%d_%d_%d_%d.jpg' % (args.x0, args.y0, args.x1, args.y1, args.x2, args.y2, args.x3, args.y3, args.emitX, args.emitY)
+                  pygame.image.save(self._screen, fname)
         return str(len(self._balls))
 
     def _add_static_scenery(self):
@@ -160,8 +170,8 @@ class BouncyBalls(object):
         radius = 25
         inertia = pymunk.moment_for_circle(mass, 0, radius, (0, 0))
         body = pymunk.Body(mass, inertia)
-        x = 200#random.randint(115, 350)
-        body.position = x, 400
+        #x = #random.randint(115, 350)
+        body.position = self._emitX, self._emitY#x, 400
         shape = pymunk.Circle(body, radius, (0, 0))
         shape.elasticity = 0.95
         shape.friction = 0.9
